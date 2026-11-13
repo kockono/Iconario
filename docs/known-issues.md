@@ -10,7 +10,7 @@ Se probaron escrituras y retiradas pendientes con sustitución y con renombrado,
 
 ## Límites vigentes
 
-- Versión experimental; todavía no hay una release estable.
+- Primera versión pública 0.1.0; se considera experimental.
 - Integración comprobada con Make.md 1.3.5 y notas de carpeta dentro de la propia carpeta, con su mismo nombre.
 - Móvil y otras versiones o configuraciones de Make.md no están validados.
 - Los cambios hechos directamente en el selector de Make.md no actualizan la asignación del explorador nativo; utiliza el menú de Iconario para mantener ambas vistas sincronizadas.

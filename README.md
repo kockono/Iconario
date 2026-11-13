@@ -1,6 +1,6 @@
 # Iconario
 
-> Versión experimental 0.1.0. Las correcciones de conservación de stickers pasaron la revisión independiente y las pruebas descritas en `docs/testing.md`. Pruébala primero en una bóveda de prueba; todavía no hay una release estable.
+> Primera versión pública 0.1.0, todavía experimental. Las correcciones de conservación de stickers pasaron la revisión independiente y las pruebas descritas en `docs/testing.md`. Pruébala primero en una bóveda de prueba y conserva un respaldo antes de usarla con tus notas.
 
 Plugin de Obsidian para insertar iconos de Font Awesome Free y Remix Icon en notas y asignarlos a archivos o carpetas. El catálogo se incluye localmente: el plugin no descarga SVG ni envía telemetría.
 
