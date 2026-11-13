@@ -7,7 +7,7 @@ import { MakeMdBridge, encodeSticker, restoreOwnedValue } from './makemd';
 import { IconPicker, validateAppearance, type Appearance } from './picker';
 
 interface OwnedSticker { previous: unknown; written: string; notePath: string; property: string; order?: number }
-interface AssignmentOperation { file: TAbstractFile }
+interface AssignmentOperation { file: TAbstractFile; notes: Set<TFile> }
 interface PluginData {
   assignments: Record<string, string>;
   favorites: string[];
@@ -21,8 +21,8 @@ interface PluginData {
 }
 
 const DEFAULTS: PluginData = {
-  assignments: {}, favorites: [], recents: [], nativeExplorer: true, makeSync: true,
-  stickerProperty: 'sticker', color: 'currentColor', size: 20, ownedStickers: {},
+  assignments: Object.create(null), favorites: [], recents: [], nativeExplorer: true, makeSync: true,
+  stickerProperty: 'sticker', color: 'currentColor', size: 20, ownedStickers: Object.create(null),
 };
 
 class PickerModal extends Modal {
@@ -53,7 +53,7 @@ class ConfirmFolderNoteModal extends Modal {
 }
 
 export default class IconarioPlugin extends Plugin {
-  data: PluginData = { ...DEFAULTS };
+  data: PluginData = { ...DEFAULTS, ownedStickers: Object.create(null) };
   private assignments = new AssignmentStore();
   private makeBridge?: MakeMdBridge;
   private decorators: NativeExplorerDecorator[] = [];
@@ -66,7 +66,8 @@ export default class IconarioPlugin extends Plugin {
     this.data = { ...DEFAULTS, ...(loaded ?? {}) };
     this.data.favorites = Array.isArray(this.data.favorites) ? this.data.favorites.filter(id => !!getIcon(id)) : [];
     this.data.recents = Array.isArray(this.data.recents) ? this.data.recents.filter(id => !!getIcon(id)).slice(0, 20) : [];
-    this.data.ownedStickers = this.data.ownedStickers && typeof this.data.ownedStickers === 'object' ? this.data.ownedStickers : {};
+    this.data.ownedStickers = Object.assign(Object.create(null),
+      this.data.ownedStickers && typeof this.data.ownedStickers === 'object' ? this.data.ownedStickers : {});
     this.assignments = new AssignmentStore(this.data.assignments);
     this.applyAppearance();
     this.addCommand({ id: 'insert-icon', name: 'Insertar icono en la nota activa', editorCallback: editor => {
@@ -110,7 +111,10 @@ export default class IconarioPlugin extends Plugin {
     }));
     this.registerEvent(this.app.vault.on('delete', file => {
       this.assignments.delete(file.path);
-      for (const path of Object.keys(this.data.ownedStickers)) if (path === file.path || path.startsWith(`${file.path}/`)) delete this.data.ownedStickers[path];
+      for (const [path, owner] of Object.entries(this.data.ownedStickers)) {
+        if (path === file.path || path.startsWith(`${file.path}/`)
+          || owner.notePath === file.path || owner.notePath.startsWith(`${file.path}/`)) delete this.data.ownedStickers[path];
+      }
       void this.persist(); this.refreshDecorators();
     }));
     this.addSettingTab(new IconarioSettings(this.app, this));
@@ -203,21 +207,30 @@ export default class IconarioPlugin extends Plugin {
   }
 
   private beginOperation(file: TAbstractFile): AssignmentOperation {
-    const operation = { file };
+    const operation = { file, notes: new Set<TFile>() };
     this.operations.set(file, operation);
     return operation;
   }
 
   private isCurrentOperation(operation: AssignmentOperation): boolean {
-    return this.operations.get(operation.file) === operation;
+    return this.operations.get(operation.file) === operation
+      && this.app.vault.getAbstractFileByPath(operation.file.path) === operation.file
+      && [...operation.notes].every(note => this.app.vault.getAbstractFileByPath(note.path) === note);
   }
 
   private async writeMakeSticker(file: TAbstractFile, id: string, operation = this.beginOperation(file)): Promise<boolean> {
     const sticker = encodeSticker(id);
     if (!sticker || !/^[A-Za-z][\w-]*$/.test(this.data.stickerProperty)) return false;
     const note = await this.targetNote(file);
+    if (note) operation.notes.add(note);
     if (!note || !this.isCurrentOperation(operation)) return false;
     const property = this.data.stickerProperty;
+    const owner = this.data.ownedStickers[file.path];
+    if (owner && (owner.notePath !== note.path || owner.property !== property)) {
+      // Release the old physical value before replacing its only ownership record.
+      await this.restoreMakeSticker(file.path, operation);
+      if (!this.isCurrentOperation(operation)) return false;
+    }
     await this.app.fileManager.processFrontMatter(note, frontmatter => {
       if (!this.isCurrentOperation(operation)) return;
       const owners = Object.values(this.data.ownedStickers)
@@ -232,6 +245,7 @@ export default class IconarioPlugin extends Plugin {
       frontmatter[property] = sticker;
       this.data.ownedStickers[file.path] = { previous, written: sticker, notePath: note.path, property, order };
     });
+    if (!this.isCurrentOperation(operation)) return false;
     await this.persist();
     return true;
   }
@@ -245,8 +259,11 @@ export default class IconarioPlugin extends Plugin {
     const currentPath = () => Object.entries(this.data.ownedStickers).find(([, value]) => value === owner)?.[0];
     const note = this.app.vault.getAbstractFileByPath(owner.notePath);
     if (note instanceof TFile) {
+      // Track physical targets through callbacks and promise completions, including handoffs.
+      operation?.notes.add(note);
       const property = owner.property;
       await this.app.fileManager.processFrontMatter(note, frontmatter => {
+        if (this.app.vault.getAbstractFileByPath(note.path) !== note) return;
         if (operation && !this.isCurrentOperation(operation)) return;
         const path = currentPath();
         if (path === undefined) return;

@@ -27,13 +27,17 @@ function harness() {
   const files = new Map<string, TFile | TFolder>([[folder.path, folder], [note.path, note], [other.path, other]]);
   const fm = new Map<string, Record<string, unknown>>([[note.path, { sticker: 'original', title: 'Conservar', nested: { a: 1 } }], [other.path, { sticker: 'other-original' }]]);
   let rename: (file: TFile | TFolder, oldPath: string) => void = () => {};
+  let deleted: (file: TFile | TFolder) => void = () => {};
   const app = {
     workspace: { on: () => ({}), onLayoutReady: () => {} },
-    vault: { getAbstractFileByPath: (path: string) => files.get(path), on: (event: string, callback: typeof rename) => { if (event === 'rename') rename = callback; return {}; } },
+    vault: { getAbstractFileByPath: (path: string) => files.get(path), on: (event: string, callback: typeof rename) => {
+      if (event === 'rename') rename = callback;
+      if (event === 'delete') deleted = callback as typeof deleted;
+      return {};
+    } },
     fileManager: { processFrontMatter: async (file: TFile, callback: (value: Record<string, unknown>) => void) => callback(fm.get(file.path)!) },
   };
   const plugin = new IconarioPlugin(app as unknown as App, { id: 'iconario', name: 'Iconario', author: '', version: '0.1.0', minAppVersion: '1.0.0', description: '' });
-  plugin.data = { ...plugin.data, ownedStickers: {} };
   const move = (file: TFile | TFolder, newPath: string) => {
     const oldPath = file.path;
     for (const [path, entry] of [...files]) {
@@ -46,7 +50,18 @@ function harness() {
     file.path = newPath;
     rename(file, oldPath);
   };
-  return { plugin, folder, note, other, fm, move, app };
+  const create = (path: string, sticker: string) => {
+    const file = Object.assign(Object.create(TFile.prototype), { path, extension: 'md' }) as TFile;
+    files.set(path, file); fm.set(path, { sticker });
+    return file;
+  };
+  const remove = (file: TFile | TFolder) => {
+    for (const path of [...files.keys()]) {
+      if (path === file.path || path.startsWith(`${file.path}/`)) { files.delete(path); fm.delete(path); }
+    }
+    deleted(file);
+  };
+  return { plugin, folder, note, other, fm, move, app, create, remove };
 }
 
 function deferNextFrontmatter(app: ReturnType<typeof harness>['app']) {
@@ -68,6 +83,223 @@ function enableMake(plugin: IconarioPlugin) {
   vi.spyOn(bridge, 'isActive').mockReturnValue(true);
   plugin['makeBridge'] = bridge;
 }
+
+describe('folder operations retain physical note identity', () => {
+  it.each([
+    ['restore', 'callback'], ['write', 'callback'],
+    ['restore', 'completion'], ['write', 'completion'],
+  ])('rejects a %s after note replacement before %s', async (action, timing) => {
+    const { plugin, folder, note, app, fm, remove, create } = harness();
+    await plugin.onload(); enableMake(plugin);
+    await plugin['assign'](folder, 'fa-solid/house');
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const process = app.fileManager.processFrontMatter;
+    vi.spyOn(app.fileManager, 'processFrontMatter').mockImplementationOnce(async (file, callback) => {
+      if (timing === 'completion') await process(file, callback);
+      entered();
+      await gate;
+      if (timing === 'callback') await process(file, callback);
+    });
+    const pending = action === 'restore'
+      ? plugin['removeAssignment'](folder) : plugin['assign'](folder, 'fa-solid/star');
+    await started;
+    remove(note); // Only the physical note is deleted; its assigning folder survives.
+    const replacement = create(note.path, house);
+    const metadata = { sticker: house, title: 'Replacement', nested: { untouched: true } };
+    fm.set(replacement.path, structuredClone(metadata));
+    release(); await pending;
+    expect(fm.get(replacement.path)).toEqual(metadata);
+    expect(plugin.data.assignments).toEqual({ Folder: 'fa-solid/house' });
+    expect(plugin.data.ownedStickers).toEqual({});
+  });
+
+  it.each(['restore', 'write'])('does not let a pending %s discard replacement ownership', async action => {
+    const { plugin, folder, note, app, fm, remove, create } = harness();
+    await plugin.onload(); enableMake(plugin);
+    await plugin['assign'](folder, 'fa-solid/house');
+    const deferred = deferNextFrontmatter(app);
+    const pending = action === 'restore'
+      ? plugin['removeAssignment'](folder) : plugin['assign'](folder, 'fa-solid/star');
+    await deferred.started;
+    remove(note);
+    const replacement = create(note.path, house);
+    fm.set(replacement.path, { sticker: house, title: 'Replacement', nested: { untouched: true } });
+    await plugin['assign'](folder, 'fa-solid/house');
+    const ownership = structuredClone(plugin.data.ownedStickers[folder.path]);
+    deferred.release(); await pending;
+    expect(fm.get(replacement.path)).toEqual({ sticker: house, title: 'Replacement', nested: { untouched: true } });
+    expect(plugin.data.assignments).toEqual({ Folder: 'fa-solid/house' });
+    expect(plugin.data.ownedStickers).toEqual({ Folder: ownership });
+    await plugin['removeAssignment'](folder);
+    expect(fm.get(replacement.path)).toEqual({ sticker: house, title: 'Replacement', nested: { untouched: true } });
+    expect(plugin.data.assignments).toEqual({});
+    expect(plugin.data.ownedStickers).toEqual({});
+  });
+
+  it.each(['restore', 'write'])('allows a pending folder %s when the same physical note is renamed', async action => {
+    const { plugin, folder, note, app, fm, move } = harness();
+    await plugin.onload(); enableMake(plugin);
+    await plugin['assign'](folder, 'fa-solid/house');
+    const deferred = deferNextFrontmatter(app);
+    const pending = action === 'restore'
+      ? plugin['removeAssignment'](folder) : plugin['assign'](folder, 'fa-solid/star');
+    await deferred.started;
+    move(note, 'Folder/Renamed.md');
+    deferred.release(); await pending;
+    expect(fm.get(note.path)).toEqual({ sticker: action === 'restore' ? 'original' : star, title: 'Conservar', nested: { a: 1 } });
+    expect(plugin.data.assignments).toEqual(action === 'restore' ? {} : { Folder: 'fa-solid/star' });
+    expect(plugin.data.ownedStickers).toEqual(action === 'restore' ? {} : {
+      Folder: expect.objectContaining({ previous: 'original', written: star, notePath: note.path }),
+    });
+  });
+});
+
+describe('round two regressions', () => {
+  it.each(['original', 'external', 'shared'])('releases the previous physical note without losing its %s value', async baseline => {
+    const { plugin, folder, note, fm, move, create } = harness();
+    await plugin.onload(); enableMake(plugin);
+    await plugin['assign'](folder, 'fa-solid/house');
+    if (baseline === 'shared') await plugin['assign'](note, 'fa-solid/star');
+    move(note, 'Folder/Renamed.md');
+    if (baseline === 'external') fm.get(note.path)!.sticker = 'external';
+    const replacement = create('Folder/Folder.md', 'new-note-original');
+    await plugin['assign'](folder, 'fa-solid/star');
+    await plugin['removeAssignment'](folder);
+    expect(fm.get(replacement.path)?.sticker).toBe('new-note-original');
+    expect(fm.get(note.path)?.sticker).toBe(baseline === 'shared' ? star : baseline);
+    if (baseline === 'shared') await plugin['removeAssignment'](note);
+    expect(fm.get(note.path)?.sticker).toBe(baseline === 'external' ? 'external' : 'original');
+    expect(plugin.data.ownedStickers).toEqual({});
+  });
+
+  it.each(['__proto__', 'constructor', 'hasOwnProperty'])('round trips ownership for the valid folder %s', async name => {
+    const { plugin, folder, note, fm, move } = harness();
+    await plugin.onload(); enableMake(plugin);
+    move(folder, name); folder.name = name;
+    move(note, `${name}/${name}.md`);
+    await plugin['assign'](folder, 'fa-solid/house');
+    const saved = JSON.parse(JSON.stringify(plugin.data));
+    expect(Object.hasOwn(saved.ownedStickers, name)).toBe(true);
+    vi.spyOn(plugin, 'loadData').mockResolvedValue(saved);
+    await plugin.onload(); enableMake(plugin);
+    await plugin['removeAssignment'](folder);
+    expect(fm.get(note.path)?.sticker).toBe('original');
+    expect(plugin.data.ownedStickers).toEqual({});
+    expect(plugin.data.assignments).toEqual({});
+  });
+
+  it.each(['older-first', 'newer-first'])('keeps latest intent when a physical-target handoff overlaps removal (%s)', async order => {
+    const { plugin, folder, note, fm, move, create, app } = harness();
+    await plugin.onload(); enableMake(plugin);
+    await plugin['assign'](folder, 'fa-solid/house');
+    move(note, 'Folder/Renamed.md');
+    create('Folder/Folder.md', 'new-note-original');
+    const handoff = deferNextFrontmatter(app);
+    const assigning = plugin['assign'](folder, 'fa-solid/star');
+    await handoff.started;
+    fm.get(note.path)!.sticker = 'external';
+    const removal = deferNextFrontmatter(app);
+    const removing = plugin['removeAssignment'](folder);
+    await removal.started;
+    if (order === 'older-first') {
+      handoff.release(); await assigning;
+      removal.release(); await removing;
+    } else {
+      removal.release(); await removing;
+      handoff.release(); await assigning;
+    }
+    expect(fm.get(note.path)?.sticker).toBe('external');
+    expect(fm.get('Folder/Folder.md')?.sticker).toBe('new-note-original');
+    expect(plugin.data.assignments).toEqual({});
+    expect(plugin.data.ownedStickers).toEqual({});
+  });
+
+  it.each(['__proto__', 'constructor', 'hasOwnProperty'])('preserves ownership renamed into and out of %s', async name => {
+    const { plugin, folder, note, fm, move } = harness();
+    await plugin.onload(); enableMake(plugin);
+    await plugin['assign'](folder, 'fa-solid/house');
+    move(folder, name);
+    expect(Object.hasOwn(plugin.data.ownedStickers, name)).toBe(true);
+    const saved = JSON.parse(JSON.stringify(plugin.data));
+    vi.spyOn(plugin, 'loadData').mockResolvedValue(saved);
+    await plugin.onload(); enableMake(plugin);
+    move(folder, 'Renamed');
+    await plugin['removeAssignment'](folder);
+    expect(fm.get(note.path)?.sticker).toBe('original');
+    expect(plugin.data.assignments).toEqual({});
+    expect(plugin.data.ownedStickers).toEqual({});
+  });
+
+  it.each(['older-first', 'newer-first'])('keeps a newer assignment during physical-target handoff (%s)', async order => {
+    const { plugin, folder, note, fm, move, create, app } = harness();
+    await plugin.onload(); enableMake(plugin);
+    await plugin['assign'](folder, 'fa-solid/house');
+    move(note, 'Folder/Renamed.md');
+    const replacement = create('Folder/Folder.md', 'new-note-original');
+    const first = deferNextFrontmatter(app);
+    const assigningFirst = plugin['assign'](folder, 'fa-solid/star');
+    await first.started;
+    const second = deferNextFrontmatter(app);
+    const assigningSecond = plugin['assign'](folder, 'fa-solid/house');
+    await second.started;
+    if (order === 'older-first') {
+      first.release(); await assigningFirst;
+      second.release(); await assigningSecond;
+    } else {
+      second.release(); await assigningSecond;
+      first.release(); await assigningFirst;
+    }
+    expect(fm.get(note.path)?.sticker).toBe('original');
+    expect(fm.get(replacement.path)?.sticker).toBe(house);
+    expect(plugin.data.assignments).toEqual({ Folder: 'fa-solid/house' });
+    await plugin['removeAssignment'](folder);
+    expect(fm.get(replacement.path)?.sticker).toBe('new-note-original');
+    expect(plugin.data.ownedStickers).toEqual({});
+  });
+
+  it.each(['note', 'folder', 'subtree'])('ignores a deferred write callback after deleting its %s', async scope => {
+    const { plugin, folder, note, app, remove, create, fm } = harness();
+    await plugin.onload(); enableMake(plugin);
+    const target = scope === 'folder' ? folder : note;
+    await plugin['assign'](target, 'fa-solid/house');
+    const deferred = deferNextFrontmatter(app);
+    const assigning = plugin['assign'](target, 'fa-solid/star');
+    await deferred.started;
+    remove(scope === 'subtree' ? folder : target);
+    create(note.path, 'replacement-original');
+    deferred.release(); await assigning;
+    expect(fm.get(note.path)?.sticker).toBe('replacement-original');
+    expect(plugin.data.assignments).toEqual({});
+    expect(plugin.data.ownedStickers).toEqual({});
+  });
+
+  it.each(['note', 'folder', 'subtree'])('does not resurrect %s assignments after delete with a completed callback but pending promise', async scope => {
+    const { plugin, folder, note, fm, app, remove } = harness();
+    await plugin.onload(); enableMake(plugin);
+    const target = scope === 'folder' ? folder : note;
+    await plugin['assign'](target, 'fa-solid/house');
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const process = app.fileManager.processFrontMatter;
+    vi.spyOn(app.fileManager, 'processFrontMatter').mockImplementationOnce(async (file, callback) => {
+      await process(file, callback);
+      entered();
+      await gate;
+    });
+    const assigning = plugin['assign'](target, 'fa-solid/star');
+    await started;
+    expect(fm.get(note.path)?.sticker).toBe(star);
+    remove(scope === 'subtree' ? folder : target);
+    release(); await assigning;
+    expect(plugin.data.assignments).toEqual({});
+    expect(plugin.data.ownedStickers).toEqual({});
+  });
+});
 
 describe('pending restoration lifecycle', () => {
   it.each(['removal-first', 'assignment-first'])('keeps the newest intent across rename with %s callbacks', async order => {

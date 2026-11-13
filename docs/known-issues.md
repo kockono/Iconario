@@ -1,21 +1,19 @@
-# Fallos pendientes
+# Estado y límites de la versión
 
-La revisión independiente final no aprobó esta versión. Las 43 pruebas automatizadas pasan, pero no cubren las dos carreras siguientes, reproducidas por el revisor con callbacks de frontmatter diferidos.
+La corrección del issue #1 pasó la revisión independiente. La suite tiene 76 pruebas correctas y el build se comprobó en una bóveda aislada de Obsidian con Make.md 1.3.5. No quedan bloqueos identificados en esa revisión; esto no garantiza la ausencia de otros errores.
 
-## Reasignar mientras se retira un icono
+## Issue #1: corregido
 
-Una retirada pendiente conserva una referencia al registro anterior. Si otro cambio modifica el sticker y se asigna un icono nuevo antes de terminar la retirada, esta puede borrar el registro nuevo. El sticker queda sin el historial necesario para recuperar el valor externo anterior.
+Las operaciones pendientes comprueban la identidad de la carpeta y de las notas físicas involucradas. Aceptan renombres del mismo archivo y rechazan archivos nuevos que sustituyan al original en la misma ruta. El borrado también limpia el ownership asociado a la nota eliminada.
 
-La corrección debe distinguir la operación que se está retirando del registro que la haya reemplazado y conservar el baseline vigente.
+Se probaron escrituras y retiradas pendientes con sustitución y con renombrado, conservando stickers, otros campos y cuerpos de las notas. Consulta `testing.md` para distinguir las pruebas automatizadas de las ejecutadas dentro de Obsidian.
 
-## Renombrar mientras se retira un icono
+## Límites vigentes
 
-Si se renombra una nota durante una retirada pendiente, el listener mueve el registro a la nueva ruta, pero la retirada sigue utilizando la anterior. Puede desaparecer la asignación local sin restaurarse el sticker, dejando un registro huérfano en la nueva ruta.
+- Versión experimental; todavía no hay una release estable.
+- Integración comprobada con Make.md 1.3.5 y notas de carpeta dentro de la propia carpeta, con su mismo nombre.
+- Móvil y otras versiones o configuraciones de Make.md no están validados.
+- Los cambios hechos directamente en el selector de Make.md no actualizan la asignación del explorador nativo; utiliza el menú de Iconario para mantener ambas vistas sincronizadas.
+- Las claves especiales de diccionario se probaron en el harness. La carpeta exacta `__proto__` no pudo resolverse mediante la API de esta instancia de Obsidian.
 
-La corrección debe seguir la identidad de la asignación a través del renombrado, también durante restauraciones pendientes.
-
-## Estado de la entrega
-
-El código y el ZIP experimental están en el proyecto, pero no deben instalarse en una bóveda de trabajo. La instancia de pruebas se cerró; no se instaló Iconario en la bóveda principal. Los cuatro archivos protegidos comprobados conservan sus hashes iniciales.
-
-Se completaron dos rondas automáticas de corrección y revisión. La siguiente ronda requiere decisión del usuario. Antes de entregar habrá que añadir regresiones para estos casos, aplicar una corrección coherente del ciclo de vida de las operaciones, repetir la revisión independiente y regenerar el paquete.
+Iconario no se instaló en la bóveda principal. Prueba esta versión primero en una bóveda de prueba.

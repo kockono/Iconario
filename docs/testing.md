@@ -24,9 +24,9 @@ El primer intento de regeneración detectó dos SVG de Remix 4.7.0 con `fill` he
 
 ## Verificación conjunta
 
-**Revisión final no aprobada.** El revisor reprodujo dos carreras adicionales durante restauraciones pendientes: una reasignación puede perder el registro nuevo y un renombrado puede dejar un sticker sin restaurar. Las pruebas y comprobaciones descritas abajo no cubren esos casos ni equivalen a aprobación de entrega. Véase `known-issues.md`.
+**Revisión independiente aprobada.** La corrección del issue #1 verifica la identidad de las notas físicas en callbacks y al completar operaciones: un renombrado del mismo archivo sigue siendo válido, pero una nota sustituta en la misma ruta no recibe datos del archivo eliminado.
 
-La suite conjunta pasó **43 pruebas en 8 archivos**. Dos regresiones adicionales reprodujeron y comprobaron la corrección de retiradas concurrentes sobre un mismo sticker y de un renombrado durante una escritura pendiente. `npm run typecheck` y `npm run package` terminaron con salida 0. La suite incluye regresiones para código Markdown, modo fuente, propiedad compartida del frontmatter, renombrados y descarga de los assets de Make.md. El cierre de la confirmación de crear una nota también se comprobó para evitar operaciones pendientes.
+La suite conjunta pasó **76 pruebas en 8 archivos**. Para el issue #1 se observaron primero seis fallos y dos controles de renombre correctos; después de la corrección, los ocho casos pasaron. Se mantienen las regresiones de reasignación, ownership compartido, cambio de destino, claves especiales y borrado durante guardados. La revisión independiente también comprobó seis interleavings de sustitución y renombre de destinos físicos sin reproducir pérdidas de baselines. `npm run typecheck` y `npm run package` terminaron con salida 0. La suite incluye regresiones para código Markdown, modo fuente, propiedad compartida del frontmatter, renombrados y descarga de los assets de Make.md. El cierre de la confirmación de crear una nota también se comprobó para evitar operaciones pendientes.
 
 ## Comprobaciones dentro de Obsidian
 
@@ -42,6 +42,9 @@ La validación real utilizó un perfil y una bóveda independientes en `.qa/`, c
 - Si otra operación cambia el sticker, quitar la asignación no sobrescribe ese cambio.
 - Cerrar con X la confirmación de crear una nota no crea la nota ni deja una promesa pendiente.
 - Al descargar Iconario se retiran sus packs y entradas de caché de Make.md.
+- En el build con la corrección del issue #1 se probaron cuatro casos: escritura y retirada pendientes, cada una con sustitución de la nota o renombrado del mismo archivo. Los cuatro terminaron sin errores; las notas sustitutas conservaron sticker, título y cuerpo, y los renombres siguieron funcionando.
+
+Las claves `__proto__`, `constructor` y `hasOwnProperty` se cubrieron en pruebas automatizadas de persistencia y renombre. La carpeta exacta `__proto__` no pudo validarse en la aplicación: esta instancia de Obsidian no la resolvió mediante su API de búsqueda. No se presenta esa parte del harness como prueba visual o de integración real.
 
 Los scripts y las capturas están en `.qa/`; no forman parte del ZIP instalable.
 

@@ -1,12 +1,12 @@
 # Iconario
 
-> Versión experimental: la revisión final sigue bloqueada por dos carreras al restaurar stickers de Make.md. No instalar en una bóveda de trabajo. Consulta `docs/known-issues.md` en el proyecto.
+> Versión experimental 0.1.0. Las correcciones de conservación de stickers pasaron la revisión independiente y las pruebas descritas en `docs/testing.md`. Pruébala primero en una bóveda de prueba; todavía no hay una release estable.
 
 Plugin de Obsidian para insertar iconos de Font Awesome Free y Remix Icon en notas y asignarlos a archivos o carpetas. El catálogo se incluye localmente: el plugin no descarga SVG ni envía telemetría.
 
 ## Instalación de prueba
 
-Descomprime `dist/iconario-0.1.0.zip` en la carpeta de plugins de un **vault de prueba**. Deben quedar `iconario/manifest.json`, `iconario/main.js` y `iconario/styles.css`. Activa el plugin desde Obsidian. No se ha instalado ni activado en el vault principal.
+Genera el paquete desde el código con `npm ci` y `npm run package`. Descomprime `dist/iconario-0.1.0.zip` en `.obsidian/plugins/` de un **vault de prueba**. Deben quedar `iconario/manifest.json`, `iconario/main.js` y `iconario/styles.css`. Activa Iconario desde los ajustes de plugins de Obsidian. No se ha instalado ni activado en el vault principal.
 
 ## Uso
 
