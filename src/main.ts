@@ -7,6 +7,7 @@ import { MakeMdBridge, encodeSticker, restoreOwnedValue } from './makemd';
 import { IconPicker, validateAppearance, type Appearance } from './picker';
 
 interface OwnedSticker { previous: unknown; written: string; notePath: string; property: string; order?: number }
+interface AssignmentOperation { file: TAbstractFile }
 interface PluginData {
   assignments: Record<string, string>;
   favorites: string[];
@@ -57,6 +58,8 @@ export default class IconarioPlugin extends Plugin {
   private makeBridge?: MakeMdBridge;
   private decorators: NativeExplorerDecorator[] = [];
   private saveChain: Promise<void> = Promise.resolve();
+  // Latest intent wins, even if the icon id is reused. File identity survives rename.
+  private operations = new WeakMap<TAbstractFile, AssignmentOperation>();
 
   async onload(): Promise<void> {
     const loaded = await this.loadData() as Partial<PluginData> | null;
@@ -95,7 +98,8 @@ export default class IconarioPlugin extends Plugin {
           if (path === oldPath || path.startsWith(`${oldPath}/`)) {
             delete this.data.ownedStickers[path];
             const next = file.path + path.slice(oldPath.length);
-            this.data.ownedStickers[next] = { ...owned, notePath: owned.notePath === oldPath || owned.notePath.startsWith(`${oldPath}/`) ? file.path + owned.notePath.slice(oldPath.length) : owned.notePath };
+            owned.notePath = owned.notePath === oldPath || owned.notePath.startsWith(`${oldPath}/`) ? file.path + owned.notePath.slice(oldPath.length) : owned.notePath;
+            this.data.ownedStickers[next] = owned;
           } else if (owned.notePath === oldPath || owned.notePath.startsWith(`${oldPath}/`)) {
             owned.notePath = file.path + owned.notePath.slice(oldPath.length);
           }
@@ -150,8 +154,10 @@ export default class IconarioPlugin extends Plugin {
 
   private async assign(file: TAbstractFile, id: string): Promise<void> {
     if (!getIcon(id)) return;
+    const operation = this.beginOperation(file);
     if (this.data.makeSync && this.makeBridge?.isActive()) {
-      const synced = await this.writeMakeSticker(file, id);
+      const synced = await this.writeMakeSticker(file, id, operation);
+      if (!this.isCurrentOperation(operation)) return;
       if (!synced) new Notice('Iconario: icono local asignado; Make.md no se sincronizó');
     }
     this.assignments.set(file.path, id);
@@ -159,7 +165,9 @@ export default class IconarioPlugin extends Plugin {
   }
 
   private async removeAssignment(file: TAbstractFile): Promise<void> {
-    await this.restoreMakeSticker(file.path);
+    const operation = this.beginOperation(file);
+    await this.restoreMakeSticker(file.path, operation);
+    if (!this.isCurrentOperation(operation)) return;
     this.assignments.remove(file.path);
     await this.persist(); this.refreshDecorators();
   }
@@ -194,13 +202,24 @@ export default class IconarioPlugin extends Plugin {
     return await this.app.vault.create(path, '');
   }
 
-  private async writeMakeSticker(file: TAbstractFile, id: string): Promise<boolean> {
+  private beginOperation(file: TAbstractFile): AssignmentOperation {
+    const operation = { file };
+    this.operations.set(file, operation);
+    return operation;
+  }
+
+  private isCurrentOperation(operation: AssignmentOperation): boolean {
+    return this.operations.get(operation.file) === operation;
+  }
+
+  private async writeMakeSticker(file: TAbstractFile, id: string, operation = this.beginOperation(file)): Promise<boolean> {
     const sticker = encodeSticker(id);
     if (!sticker || !/^[A-Za-z][\w-]*$/.test(this.data.stickerProperty)) return false;
     const note = await this.targetNote(file);
-    if (!note) return false;
+    if (!note || !this.isCurrentOperation(operation)) return false;
     const property = this.data.stickerProperty;
     await this.app.fileManager.processFrontMatter(note, frontmatter => {
+      if (!this.isCurrentOperation(operation)) return;
       const owners = Object.values(this.data.ownedStickers)
         .filter(owner => owner.notePath === note.path && owner.property === property)
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -217,13 +236,20 @@ export default class IconarioPlugin extends Plugin {
     return true;
   }
 
-  private async restoreMakeSticker(path: string): Promise<void> {
+  private async restoreMakeSticker(path: string, operation?: AssignmentOperation): Promise<void> {
     const owner = this.data.ownedStickers[path];
     if (!owner) return;
+    const target = this.app.vault.getAbstractFileByPath(path);
+    if (!operation && target) operation = this.beginOperation(target);
+    // Ownership identity follows rename, but must never match a replacement write.
+    const currentPath = () => Object.entries(this.data.ownedStickers).find(([, value]) => value === owner)?.[0];
     const note = this.app.vault.getAbstractFileByPath(owner.notePath);
     if (note instanceof TFile) {
       const property = owner.property;
       await this.app.fileManager.processFrontMatter(note, frontmatter => {
+        if (operation && !this.isCurrentOperation(operation)) return;
+        const path = currentPath();
+        if (path === undefined) return;
         // Read and remove ownership in the same synchronous mutation as frontmatter.
         const owners = Object.entries(this.data.ownedStickers)
           .filter(([, other]) => other.notePath === note.path && other.property === property)
@@ -237,7 +263,10 @@ export default class IconarioPlugin extends Plugin {
         }
         delete this.data.ownedStickers[path];
       });
-    } else delete this.data.ownedStickers[path];
+    } else {
+      const path = currentPath();
+      if (path !== undefined && (!operation || this.isCurrentOperation(operation))) delete this.data.ownedStickers[path];
+    }
   }
 
   refreshDecorators(): void {
