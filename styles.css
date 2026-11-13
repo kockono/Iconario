@@ -1,0 +1,10 @@
+.iconario-inline-icon,.iconario-live-icon svg,.iconario-explorer-icon svg{width:var(--iconario-size,1em);height:var(--iconario-size,1em);vertical-align:-.125em;fill:currentColor;color:var(--iconario-color,currentColor)}
+.iconario-explorer-icon{display:inline-flex;align-items:center;margin-inline-end:.3em;pointer-events:none}
+.iconario-picker{display:grid;grid-template-columns:1fr auto auto auto;gap:.5rem}
+.iconario-picker input[type=search]{min-width:0}
+.iconario-results{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(7rem,1fr));max-height:20rem;overflow:auto;gap:.25rem}
+.iconario-results button{display:flex;align-items:center;justify-content:flex-start;gap:.3rem;min-width:0;overflow:hidden}
+.iconario-results button span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.iconario-results button[aria-selected=true]{outline:2px solid var(--interactive-accent)}
+.iconario-results svg,.iconario-preview svg{width:1.25em;height:1.25em;fill:currentColor;flex:none}
+.iconario-preview{grid-column:1/-1;display:flex;align-items:center;gap:.5rem}

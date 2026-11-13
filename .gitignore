@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.tmp/
+.bun-cache/
+.qa/
+.codegraph/
+.atl/
+odd/
+AGENTS.md
+MAKE_MD_RESEARCH.md
+main.js
+.env
+.env.*
+*.log

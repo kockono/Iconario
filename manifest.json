@@ -1,0 +1,9 @@
+{
+  "id": "iconario",
+  "name": "Iconario",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Local Font Awesome Free and Remix Icon picker for notes and files.",
+  "author": "Iconario contributors",
+  "isDesktopOnly": false
+}
